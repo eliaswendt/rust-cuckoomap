@@ -1,4 +1,12 @@
-# Cuckoo Filter
+# Cuckoo Map
+This fork extends the implementation to function as a key-value store with similar properties to Cucko Filter.
+
+
+The original implementation allowed counting the number of insertions, when storing values alongside a fingerprint we can't distinguish values with the same fingerprint anymore. Therefore this implementation drops support for counting. This does not limit its ability to delete entries.
+
+**CODE IS BARELY TESTED AND STILL REQUIRES SOME MAINTENANCE!**
+
+# [ORIGINAL DESCRIPTION]: Cuckoo Filter
 
 [![Crates.io](https://img.shields.io/crates/v/cuckoofilter.svg?maxAge=2592000)](https://crates.io/crates/cuckoofilter)
 
