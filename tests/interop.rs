@@ -1,4 +1,4 @@
-use cuckoofilter::{CuckooFilter, ExportedCuckooFilter};
+use cuckoomap::{CuckooMap, ExportedCuckooFilter, Value};
 
 use std::collections::hash_map::DefaultHasher;
 
@@ -6,12 +6,12 @@ use std::collections::hash_map::DefaultHasher;
 fn interoperability() {
     let total_items = 1_000_000;
 
-    let mut filter = CuckooFilter::<DefaultHasher>::with_capacity(total_items);
+    let mut filter = CuckooMap::<DefaultHasher>::with_capacity(total_items);
 
     let mut num_inserted: u64 = 0;
     // Fit as many values in as possible, count how many made it in.
     for i in 0..total_items {
-        match filter.add(&i) {
+        match filter.add(&i, Value::new()) {
             Ok(_) => num_inserted += 1,
             Err(_) => break,
         }
@@ -22,20 +22,20 @@ fn interoperability() {
     let store: ExportedCuckooFilter = filter.export();
 
     // Create a new filter using the `recover` method and the values previously exported.
-    let recovered_filter = CuckooFilter::<DefaultHasher>::from(store);
+    let recovered_filter = CuckooMap::<DefaultHasher>::from(store);
 
     // The range 0..num_inserted are all known to be in the filter.
     // The filters shouldn't return false negatives, and therefore they should all be contained.
     // Both filters should also be identical.
     for i in 0..num_inserted {
-        assert!(filter.contains(&i));
-        assert!(recovered_filter.contains(&i));
+        assert!(filter.contains(&i).is_some());
+        assert!(recovered_filter.contains(&i).is_some());
     }
 
     // The range total_items..(2 * total_items) are all known *not* to be in the filter.
     // Every element for which the filter claims that it is contained is therefore a false positive, and both the original filter and recovered filter should exhibit the same false positive behaviour.
     for i in total_items..(2 * total_items) {
-        assert_eq!(filter.contains(&i), recovered_filter.contains(&i));
+        assert_eq!(filter.contains(&i).is_some(), recovered_filter.contains(&i).is_some());
     }
 }
 

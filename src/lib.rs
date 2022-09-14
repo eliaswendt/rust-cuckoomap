@@ -13,7 +13,7 @@
 //! And this in your crate root:
 //!
 //! ```rust
-//! extern crate cuckoofilter;
+//! extern crate cuckoomap;
 //! ```
 
 mod bucket;
@@ -41,6 +41,9 @@ pub const MAX_REBUCKET: u32 = 500;
 /// The default number of buckets.
 pub const DEFAULT_CAPACITY: usize = (1 << 20) - 1;
 
+pub const VALUE_SIZE: usize = 1;
+
+
 #[derive(Debug)]
 pub enum CuckooError {
     NotEnoughSpace,
@@ -64,14 +67,15 @@ impl StdError for CuckooError {
 /// # Examples
 ///
 /// ```
-/// extern crate cuckoofilter;
+/// extern crate cuckoomap;
+/// use cuckoomap::Value;
 ///
 /// let words = vec!["foo", "bar", "xylophone", "milagro"];
-/// let mut cf = cuckoofilter::CuckooFilter::new();
+/// let mut cf = cuckoomap::CuckooMap::new();
 ///
 /// let mut insertions = 0;
 /// for s in &words {
-///     if cf.test_and_add(s).unwrap() {
+///     if cf.test_and_add(s, Value::new()).unwrap() {
 ///         insertions += 1;
 ///     }
 /// }
@@ -80,7 +84,7 @@ impl StdError for CuckooError {
 /// assert_eq!(cf.len(), words.len());
 ///
 /// // Re-add the first element.
-/// cf.add(words[0]);
+/// cf.add(words[0], Value::new());
 ///
 /// assert_eq!(cf.len(), words.len() + 1);
 ///
@@ -97,7 +101,7 @@ impl StdError for CuckooError {
 /// assert!(cf.is_empty());
 ///
 /// for s in &words {
-///     if cf.test_and_add(s).unwrap() {
+///     if cf.test_and_add(s, Value::new()).unwrap() {
 ///         insertions += 1;
 ///     }
 /// }
@@ -107,26 +111,45 @@ impl StdError for CuckooError {
 /// assert!(cf.is_empty());
 ///
 /// ```
-pub struct CuckooFilter<H> {
+/// 
+
+/// type for value of the key-value pair
+/// gets saved inside an Entry together with the Key's Fingerprint
+#[derive(Clone, Copy)]
+pub struct Value {
+    pub data: [u8; VALUE_SIZE]
+}
+
+impl Value {
+    pub fn new() -> Self {
+        Self {
+            data: [0; VALUE_SIZE]
+        }
+    }
+}
+
+
+
+pub struct CuckooMap<H> {
     buckets: Box<[Bucket]>,
     len: usize,
     _hasher: std::marker::PhantomData<H>,
 }
 
-impl Default for CuckooFilter<DefaultHasher> {
+impl Default for CuckooMap<DefaultHasher> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl CuckooFilter<DefaultHasher> {
+impl CuckooMap<DefaultHasher> {
     /// Construct a CuckooFilter with default capacity and hasher.
     pub fn new() -> Self {
         Self::with_capacity(DEFAULT_CAPACITY)
     }
 }
 
-impl<H> CuckooFilter<H>
+impl<H> CuckooMap<H>
 where
     H: Hasher + Default,
 {
@@ -144,17 +167,26 @@ where
         }
     }
 
-    /// Checks if `data` is in the filter.
-    pub fn contains<T: ?Sized + Hash>(&self, data: &T) -> bool {
-        let FaI { fp, i1, i2 } = get_fai::<T, H>(data);
+    /// Checks if `key` is in the filter.
+    /// returns `Some(value)` if key probably is in the map
+    /// returns `None` if key is definitely not in the map
+    pub fn contains<T: ?Sized + Hash>(&self, key: &T) -> Option<Value> {
+        let FaI { fp, i1, i2 } = get_fai::<T, H>(key);
         let len = self.buckets.len();
-        self.buckets[i1 % len]
-            .get_fingerprint_index(fp)
-            .or_else(|| self.buckets[i2 % len].get_fingerprint_index(fp))
-            .is_some()
+        
+        if self.buckets[i1 % len].fingerprint == fp {
+            return Some(self.buckets[i1 % len].value)
+        }
+
+        if self.buckets[i2 % len].fingerprint == fp {
+            return Some(self.buckets[i2 % len].value)
+        }
+        
+        // not found
+        None
     }
 
-    /// Adds `data` to the filter. Returns `Ok` if the insertion was successful,
+    /// Adds `key` along with a `key` to the filter. Returns `Ok` if the insertion was successful,
     /// but could fail with a `NotEnoughSpace` error, especially when the filter
     /// is nearing its capacity.
     /// Note that while you can put any hashable type in the same filter, beware
@@ -165,27 +197,36 @@ where
     /// **Note:** When this returns `NotEnoughSpace`, the element given was
     /// actually added to the filter, but some random *other* element was
     /// removed. This might improve in the future.
-    pub fn add<T: ?Sized + Hash>(&mut self, data: &T) -> Result<(), CuckooError> {
+    pub fn add<T: ?Sized + Hash>(&mut self, data: &T, value: Value) -> Result<(), CuckooError> {
         let fai = get_fai::<T, H>(data);
-        if self.put(fai.fp, fai.i1) || self.put(fai.fp, fai.i2) {
+        if self.put(fai.i1, fai.fp, value) || self.put(fai.i2, fai.fp, value) {
             return Ok(());
         }
         let len = self.buckets.len();
         let mut rng = rand::thread_rng();
         let mut i = fai.random_index(&mut rng);
-        let mut fp = fai.fp;
+
+        let mut current_bucket = Bucket {
+            fingerprint: fai.fp,
+            value: value
+        };
+
         for _ in 0..MAX_REBUCKET {
-            let other_fp;
+            let other_bucket;
             {
-                let loc = &mut self.buckets[i % len].buffer[rng.gen_range(0, BUCKET_SIZE)];
-                other_fp = *loc;
-                *loc = fp;
-                i = get_alt_index::<H>(other_fp, i);
+                // save bucket that will get kicket out
+                other_bucket = self.buckets[i % len];
+
+                // save current_bucket into current position
+                self.buckets[i % len] = current_bucket;
+
+                // generate next position
+                i = get_alt_index::<H>(other_bucket.fingerprint, i);
             }
-            if self.put(other_fp, i) {
+            if self.put(i, other_bucket.fingerprint, other_bucket.value) {
                 return Ok(());
             }
-            fp = other_fp;
+            current_bucket = other_bucket;
         }
         // fp is dropped here, which means that the last item that was
         // rebucketed gets removed from the filter.
@@ -197,14 +238,14 @@ where
         Err(CuckooError::NotEnoughSpace)
     }
 
-    /// Adds `data` to the filter if it does not exist in the filter yet.
-    /// Returns `Ok(true)` if `data` was not yet present in the filter and added
+    /// Adds `key` to the filter if it does not exist in the filter yet.
+    /// Returns `Ok(true)` if `key` was not yet present in the filter and added
     /// successfully.
-    pub fn test_and_add<T: ?Sized + Hash>(&mut self, data: &T) -> Result<bool, CuckooError> {
-        if self.contains(data) {
+    pub fn test_and_add<T: ?Sized + Hash>(&mut self, key: &T, value: Value) -> Result<bool, CuckooError> {
+        if self.contains(key).is_some() {
             Ok(false)
         } else {
-            self.add(data).map(|_| true)
+            self.add(key, value).map(|_| true)
         }
     }
 
@@ -268,9 +309,9 @@ where
         }
     }
 
-    fn put(&mut self, fp: Fingerprint, i: usize) -> bool {
+    fn put(&mut self, i: usize, fp: Fingerprint, value: Value) -> bool {
         let len = self.buckets.len();
-        if self.buckets[i % len].insert(fp) {
+        if self.buckets[i % len].insert(fp, value) {
             self.len += 1;
             true
         } else {
@@ -288,7 +329,7 @@ pub struct ExportedCuckooFilter {
     pub length: usize,
 }
 
-impl<H> From<ExportedCuckooFilter> for CuckooFilter<H> {
+impl<H> From<ExportedCuckooFilter> for CuckooMap<H> {
     /// Converts a simplified representation of a filter used for export to a
     /// fully functioning version.
     ///
@@ -315,13 +356,13 @@ impl<H> From<ExportedCuckooFilter> for CuckooFilter<H> {
     }
 }
 
-impl<H> From<&CuckooFilter<H>> for ExportedCuckooFilter
+impl<H> From<&CuckooMap<H>> for ExportedCuckooFilter
 where
     H: Hasher + Default,
 {
     /// Converts a `CuckooFilter` into a simplified version which can be serialized and stored
     /// for later use.
-    fn from(cuckoo: &CuckooFilter<H>) -> Self {
+    fn from(cuckoo: &CuckooMap<H>) -> Self {
         Self {
             values: cuckoo.values(),
             length: cuckoo.len(),

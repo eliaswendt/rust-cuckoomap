@@ -1,6 +1,8 @@
+use crate::Value;
+
+pub const BUCKET_SIZE: usize = 1;
 pub const FINGERPRINT_SIZE: usize = 1;
-pub const BUCKET_SIZE: usize = 4;
-const EMPTY_FINGERPRINT_DATA: [u8; FINGERPRINT_SIZE] = [100; FINGERPRINT_SIZE];
+const EMPTY_FINGERPRINT: [u8; FINGERPRINT_SIZE] = [100; FINGERPRINT_SIZE];
 
 // Fingerprint Size is 1 byte so lets remove the Vec
 #[derive(PartialEq, Copy, Clone, Hash)]
@@ -24,13 +26,13 @@ impl Fingerprint {
     /// Returns the empty Fingerprint.
     pub fn empty() -> Self {
         Self {
-            data: EMPTY_FINGERPRINT_DATA,
+            data: EMPTY_FINGERPRINT,
         }
     }
 
     /// Checks if this is the empty Fingerprint.
     pub fn is_empty(&self) -> bool {
-        self.data == EMPTY_FINGERPRINT_DATA
+        self.data == EMPTY_FINGERPRINT
     }
 
     /// Sets the fingerprint value to a previously exported one via an in-memory copy.
@@ -39,55 +41,51 @@ impl Fingerprint {
     }
 }
 
+
+
 /// Manages `BUCKET_SIZE` fingerprints at most.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Bucket {
-    pub buffer: [Fingerprint; BUCKET_SIZE],
+    pub fingerprint: Fingerprint,
+    pub value: Value
 }
 
 impl Bucket {
     /// Creates a new bucket with a pre-allocated buffer.
     pub fn new() -> Self {
         Self {
-            buffer: [Fingerprint::empty(); BUCKET_SIZE],
+            fingerprint: Fingerprint::empty(),
+            value: Value::new()
         }
     }
 
     /// Inserts the fingerprint into the buffer if the buffer is not full.
     /// This operation is O(1).
-    pub fn insert(&mut self, fp: Fingerprint) -> bool {
-        for entry in &mut self.buffer {
-            if entry.is_empty() {
-                *entry = fp;
-                return true;
-            }
+    pub fn insert(&mut self, fingerprint: Fingerprint, value: Value) -> bool {
+    
+        if self.fingerprint.is_empty() {
+            self.fingerprint = fingerprint;
+            self.value = value;
+            return true;
         }
         false
     }
 
     /// Deletes the given fingerprint from the bucket. This operation is O(1).
-    pub fn delete(&mut self, fp: Fingerprint) -> bool {
-        match self.get_fingerprint_index(fp) {
-            Some(index) => {
-                self.buffer[index] = Fingerprint::empty();
-                true
-            }
-            None => false,
-        }
-    }
+    pub fn delete(&mut self, fingerprint: Fingerprint) -> bool {
 
-    /// Returns the index of the given fingerprint, if its found. O(1)
-    pub fn get_fingerprint_index(&self, fp: Fingerprint) -> Option<usize> {
-        self.buffer.iter().position(|e| *e == fp)
+        if self.fingerprint == fingerprint {
+            self.fingerprint = Fingerprint::empty();
+            // no need to invalidate data
+            true
+        } else {
+            false
+        }
     }
 
     /// Returns all current fingerprint data of the current buffer for storage.
     pub fn get_fingerprint_data(&self) -> Vec<u8> {
-        self.buffer
-            .iter()
-            .flat_map(|f| f.data.iter())
-            .cloned()
-            .collect()
+        self.fingerprint.data.to_vec()
     }
 
     /// Empties the bucket by setting each used entry to Fingerprint::empty(). Returns the number of entries that were modified.
@@ -99,11 +97,14 @@ impl Bucket {
 
 impl From<&[u8]> for Bucket {
     /// Constructs a buffer of fingerprints from a set of previously exported fingerprints.
-    fn from(fingerprints: &[u8]) -> Self {
-        let mut buffer = [Fingerprint::empty(); BUCKET_SIZE];
-        for (idx, value) in fingerprints.chunks(FINGERPRINT_SIZE).enumerate() {
-            buffer[idx].slice_copy(value);
+    fn from(fingerprint: &[u8]) -> Self {
+
+        let mut new_fingerprint = Fingerprint::empty();
+        new_fingerprint.slice_copy(fingerprint);
+
+        Self {
+            fingerprint: new_fingerprint,
+            value: Value::new() // TODO: also import Values
         }
-        Self { buffer }
     }
 }

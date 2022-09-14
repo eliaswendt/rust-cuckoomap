@@ -1,4 +1,4 @@
-use cuckoofilter::CuckooFilter;
+use cuckoomap::{CuckooMap, Value};
 
 use std::collections::hash_map::DefaultHasher;
 
@@ -10,13 +10,13 @@ use std::collections::hash_map::DefaultHasher;
 fn false_positive_rate() {
     let total_items = 1_000_000;
 
-    let mut filter = CuckooFilter::<DefaultHasher>::with_capacity(total_items);
+    let mut filter = CuckooMap::<DefaultHasher>::with_capacity(total_items);
 
     let mut num_inserted: u64 = 0;
     // We might not be able to get all items in, but still there should be enough
     // so we can just use what has fit in and continue with the test.
     for i in 0..total_items {
-        match filter.add(&i) {
+        match filter.add(&i, Value::new()) {
             Ok(_) => num_inserted += 1,
             Err(_) => break,
         }
@@ -25,14 +25,14 @@ fn false_positive_rate() {
     // The range 0..num_inserted are all known to be in the filter.
     // The filter shouldn't return false negatives, and therefore they should all be contained.
     for i in 0..num_inserted {
-        assert!(filter.contains(&i));
+        assert!(filter.contains(&i).is_some());
     }
 
     // The range total_items..(2 * total_items) are all known *not* to be in the filter.
     // Every element for which the filter claims that it is contained is therefore a false positive.
     let mut false_queries: u64 = 0;
     for i in total_items..(2 * total_items) {
-        if filter.contains(&i) {
+        if filter.contains(&i).is_some() {
             false_queries += 1;
         }
     }

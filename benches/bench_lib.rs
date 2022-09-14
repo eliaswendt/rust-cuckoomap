@@ -1,6 +1,6 @@
 #![feature(test)]
 
-extern crate cuckoofilter;
+extern crate cuckoomap;
 #[cfg(feature = "farmhash")]
 extern crate farmhash;
 #[cfg(feature = "fnv")]
@@ -8,7 +8,7 @@ extern crate fnv;
 extern crate rand;
 extern crate test;
 
-use self::cuckoofilter::*;
+use self::cuckoomap::*;
 use std::error::Error;
 use std::fs::File;
 use std::io::prelude::*;
@@ -36,11 +36,11 @@ fn get_words() -> String {
 fn perform_insertions<H: std::hash::Hasher + Default>(b: &mut test::Bencher) {
     let contents = get_words();
     let split: Vec<&str> = contents.split("\n").take(1000).collect();
-    let mut cf = CuckooFilter::<H>::with_capacity(split.len() * 2);
+    let mut cf = CuckooMap::<H>::with_capacity(split.len() * 2);
 
     b.iter(|| {
         for s in &split {
-            test::black_box(cf.test_and_add(s).unwrap());
+            test::black_box(cf.test_and_add(s, Value::new()).unwrap());
         }
     });
 }
@@ -48,13 +48,13 @@ fn perform_insertions<H: std::hash::Hasher + Default>(b: &mut test::Bencher) {
 #[bench]
 fn bench_new(b: &mut test::Bencher) {
     b.iter(|| {
-        test::black_box(CuckooFilter::new());
+        test::black_box(CuckooMap::new());
     });
 }
 
 #[bench]
 fn bench_clear(b: &mut test::Bencher) {
-    let mut cf = test::black_box(CuckooFilter::new());
+    let mut cf = test::black_box(CuckooMap::new());
 
     b.iter(|| {
         test::black_box(cf.clear());
