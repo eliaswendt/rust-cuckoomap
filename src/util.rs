@@ -30,8 +30,8 @@ pub fn get_alt_index<H: Hasher + Default>(fp: Fingerprint, i: usize) -> usize {
 }
 
 impl FaI {
-    fn from_data<T: ?Sized + Hash, H: Hasher + Default>(data: &T) -> Self {
-        let (fp_hash, index_hash) = get_hash::<_, H>(data);
+    fn from_key<T: ?Sized + Hash, H: Hasher + Default>(key: &T) -> Self {
+        let (fp_hash, index_hash) = get_hash::<_, H>(key);
 
         let mut fp_hash_arr = [0; FINGERPRINT_SIZE];
         let _ = (&mut fp_hash_arr[..]).write_u32::<BigEndian>(fp_hash);
@@ -68,7 +68,7 @@ impl FaI {
 }
 
 pub fn get_fai<T: ?Sized + Hash, H: Hasher + Default>(data: &T) -> FaI {
-    FaI::from_data::<_, H>(data)
+    FaI::from_key::<_, H>(data)
 }
 
 #[cfg(test)]

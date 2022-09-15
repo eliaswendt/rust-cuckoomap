@@ -1,6 +1,5 @@
 use crate::Value;
 
-pub const BUCKET_SIZE: usize = 1;
 pub const FINGERPRINT_SIZE: usize = 1;
 const EMPTY_FINGERPRINT: [u8; FINGERPRINT_SIZE] = [100; FINGERPRINT_SIZE];
 
@@ -42,8 +41,6 @@ impl Fingerprint {
 }
 
 
-
-/// Manages `BUCKET_SIZE` fingerprints at most.
 #[derive(Clone, Copy)]
 pub struct Bucket {
     pub fingerprint: Fingerprint,
@@ -55,15 +52,16 @@ impl Bucket {
     pub fn new() -> Self {
         Self {
             fingerprint: Fingerprint::empty(),
-            value: Value::new()
+            value: Value(0)
         }
     }
 
-    /// Inserts the fingerprint into the buffer if the buffer is not full.
+    /// Inserts the fingerprint into the `Bucket` if not full, OR 
+    /// the fingerprint is the same.
     /// This operation is O(1).
     pub fn insert(&mut self, fingerprint: Fingerprint, value: Value) -> bool {
     
-        if self.fingerprint.is_empty() {
+        if self.fingerprint.is_empty() || self.fingerprint == fingerprint {
             self.fingerprint = fingerprint;
             self.value = value;
             return true;
@@ -104,7 +102,7 @@ impl From<&[u8]> for Bucket {
 
         Self {
             fingerprint: new_fingerprint,
-            value: Value::new() // TODO: also import Values
+            value: Value(0) // TODO: also import Values
         }
     }
 }

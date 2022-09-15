@@ -19,7 +19,7 @@
 mod bucket;
 mod util;
 
-use crate::bucket::{Bucket, Fingerprint, BUCKET_SIZE, FINGERPRINT_SIZE};
+use crate::bucket::{Bucket, Fingerprint, FINGERPRINT_SIZE};
 use crate::util::{get_alt_index, get_fai, FaI};
 
 use std::cmp;
@@ -40,9 +40,6 @@ pub const MAX_REBUCKET: u32 = 500;
 
 /// The default number of buckets.
 pub const DEFAULT_CAPACITY: usize = (1 << 20) - 1;
-
-pub const VALUE_SIZE: usize = 1;
-
 
 #[derive(Debug)]
 pub enum CuckooError {
@@ -116,19 +113,7 @@ impl StdError for CuckooError {
 /// type for value of the key-value pair
 /// gets saved inside an Entry together with the Key's Fingerprint
 #[derive(Clone, Copy)]
-pub struct Value {
-    pub data: [u8; VALUE_SIZE]
-}
-
-impl Value {
-    pub fn new() -> Self {
-        Self {
-            data: [0; VALUE_SIZE]
-        }
-    }
-}
-
-
+pub struct Value(pub u8);
 
 pub struct CuckooMap<H> {
     buckets: Box<[Bucket]>,
@@ -155,7 +140,7 @@ where
 {
     /// Constructs a Cuckoo Filter with a given max capacity
     pub fn with_capacity(cap: usize) -> Self {
-        let capacity = cmp::max(1, cap.next_power_of_two() / BUCKET_SIZE);
+        let capacity = cmp::max(1, cap.next_power_of_two());
 
         Self {
             buckets: repeat(Bucket::new())
@@ -197,11 +182,12 @@ where
     /// **Note:** When this returns `NotEnoughSpace`, the element given was
     /// actually added to the filter, but some random *other* element was
     /// removed. This might improve in the future.
-    pub fn add<T: ?Sized + Hash>(&mut self, data: &T, value: Value) -> Result<(), CuckooError> {
-        let fai = get_fai::<T, H>(data);
+    pub fn add<T: ?Sized + Hash>(&mut self, key: &T, value: Value) -> Result<(), CuckooError> {
+        let fai = get_fai::<T, H>(key);
         if self.put(fai.i1, fai.fp, value) || self.put(fai.i2, fai.fp, value) {
             return Ok(());
         }
+
         let len = self.buckets.len();
         let mut rng = rand::thread_rng();
         let mut i = fai.random_index(&mut rng);
@@ -212,21 +198,21 @@ where
         };
 
         for _ in 0..MAX_REBUCKET {
-            let other_bucket;
+            let kicked_bucket;
             {
                 // save bucket that will get kicket out
-                other_bucket = self.buckets[i % len];
+                kicked_bucket = self.buckets[i % len];
 
                 // save current_bucket into current position
                 self.buckets[i % len] = current_bucket;
 
-                // generate next position
-                i = get_alt_index::<H>(other_bucket.fingerprint, i);
+                // generate next position for kicked_bucket
+                i = get_alt_index::<H>(kicked_bucket.fingerprint, i);
             }
-            if self.put(i, other_bucket.fingerprint, other_bucket.value) {
+            if self.put(i, kicked_bucket.fingerprint, kicked_bucket.value) {
                 return Ok(());
             }
-            current_bucket = other_bucket;
+            current_bucket = kicked_bucket;
         }
         // fp is dropped here, which means that the last item that was
         // rebucketed gets removed from the filter.
@@ -273,8 +259,8 @@ where
 
     /// Deletes `data` from the filter. Returns true if `data` existed in the
     /// filter before.
-    pub fn delete<T: ?Sized + Hash>(&mut self, data: &T) -> bool {
-        let FaI { fp, i1, i2 } = get_fai::<T, H>(data);
+    pub fn delete<T: ?Sized + Hash>(&mut self, key: &T) -> bool {
+        let FaI { fp, i1, i2 } = get_fai::<T, H>(key);
         self.remove(fp, i1) || self.remove(fp, i2)
     }
 
@@ -309,14 +295,26 @@ where
         }
     }
 
+    /// overwrites a bucket if fingerprint matches (prob. because of same key)
     fn put(&mut self, i: usize, fp: Fingerprint, value: Value) -> bool {
         let len = self.buckets.len();
+
         if self.buckets[i % len].insert(fp, value) {
             self.len += 1;
             true
         } else {
             false
         }
+    }
+
+    /// calculates the the ratio of filled / empty buckets
+    pub fn density(&self) -> f64 {
+
+        let n_filled_buckets = self.buckets.iter()
+            .filter(|b| !b.fingerprint.is_empty())
+            .count();
+
+        n_filled_buckets as f64 / self.buckets.len() as f64
     }
 }
 
@@ -346,7 +344,7 @@ impl<H> From<ExportedCuckooFilter> for CuckooMap<H> {
         Self {
             buckets: exported
                 .values
-                .chunks(BUCKET_SIZE * FINGERPRINT_SIZE)
+                .chunks(FINGERPRINT_SIZE)
                 .map(Bucket::from)
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),

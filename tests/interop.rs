@@ -11,7 +11,7 @@ fn interoperability() {
     let mut num_inserted: u64 = 0;
     // Fit as many values in as possible, count how many made it in.
     for i in 0..total_items {
-        match filter.add(&i, Value::new()) {
+        match filter.add(&i, Value(0)) {
             Ok(_) => num_inserted += 1,
             Err(_) => break,
         }
