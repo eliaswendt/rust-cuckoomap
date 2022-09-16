@@ -33,6 +33,7 @@ use std::mem;
 
 use bucket::VALUE_SIZE;
 use rand::Rng;
+use rand::prelude::ThreadRng;
 #[cfg(feature = "serde_support")]
 use serde_derive::{Deserialize, Serialize};
 
@@ -119,6 +120,7 @@ pub struct Value(pub u8);
 pub struct CuckooMap<H> {
     buckets: Box<[Bucket]>,
     len: usize,
+    rng: ThreadRng,
     _hasher: std::marker::PhantomData<H>,
 }
 
@@ -149,6 +151,7 @@ where
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
             len: 0,
+            rng: rand::thread_rng(),
             _hasher: PhantomData,
         }
     }
@@ -185,32 +188,32 @@ where
     /// removed. This might improve in the future.
     pub fn insert<T: ?Sized + Hash>(&mut self, key: &T, value: [u8; VALUE_SIZE]) -> Result<(), CuckooError> {
         let fai = get_fai::<T, H>(key);
-        if self.put(fai.i1, fai.fp, value) || self.put(fai.i2, fai.fp, value) {
-            return Ok(());
-        }
-
-        let len = self.buckets.len();
-        let mut rng = rand::thread_rng();
-        let mut i = fai.random_index(&mut rng);
-
+        
         let mut current_bucket = Bucket {
             fingerprint: fai.fp,
             value: value
         };
 
+        if self.put(fai.i1, &current_bucket) || self.put(fai.i2, &current_bucket) {
+            return Ok(());
+        }
+
+        let len = self.buckets.len();
+        let mut i = fai.random_index(&mut self.rng);
+
         for _ in 0..MAX_REBUCKET {
             let kicked_bucket;
-            {
-                // save bucket that will get kicket out
-                kicked_bucket = self.buckets[i % len];
+        
+            // save bucket that will get kicket out
+            kicked_bucket = self.buckets[i % len];
 
-                // save current_bucket into current position
-                self.buckets[i % len] = current_bucket;
+            // save current_bucket into current position
+            self.buckets[i % len] = current_bucket;
 
-                // generate next position for kicked_bucket
-                i = get_alt_index::<H>(kicked_bucket.fingerprint, i);
-            }
-            if self.put(i, kicked_bucket.fingerprint, kicked_bucket.value) {
+            // generate next position for kicked_bucket
+            i = get_alt_index::<H>(kicked_bucket.fingerprint, i);
+            
+            if self.put(i, &kicked_bucket) {
                 return Ok(());
             }
             current_bucket = kicked_bucket;
@@ -285,10 +288,10 @@ where
     }
 
     /// overwrites a bucket if fingerprint matches (prob. because of same key)
-    fn put(&mut self, i: usize, fp: Fingerprint, value: [u8; VALUE_SIZE]) -> bool {
+    fn put(&mut self, i: usize, bucket: &Bucket) -> bool {
         let len = self.buckets.len();
 
-        if self.buckets[i % len].set(fp, value) {
+        if self.buckets[i % len].set(bucket.fingerprint, bucket.value) {
             self.len += 1;
             true
         } else {
