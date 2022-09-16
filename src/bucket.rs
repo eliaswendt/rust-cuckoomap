@@ -1,7 +1,7 @@
-use crate::Value;
-
 pub const FINGERPRINT_SIZE: usize = 1;
-const EMPTY_FINGERPRINT: [u8; FINGERPRINT_SIZE] = [100; FINGERPRINT_SIZE];
+// we define fingerprint 0 as empty
+const EMPTY_FINGERPRINT: [u8; FINGERPRINT_SIZE] = [0; FINGERPRINT_SIZE];
+pub const VALUE_SIZE: usize = 1;
 
 // Fingerprint Size is 1 byte so lets remove the Vec
 #[derive(PartialEq, Copy, Clone, Hash)]
@@ -44,7 +44,7 @@ impl Fingerprint {
 #[derive(Clone, Copy)]
 pub struct Bucket {
     pub fingerprint: Fingerprint,
-    pub value: Value
+    pub value: [u8; VALUE_SIZE]
 }
 
 impl Bucket {
@@ -52,14 +52,14 @@ impl Bucket {
     pub fn new() -> Self {
         Self {
             fingerprint: Fingerprint::empty(),
-            value: Value(0)
+            value: [0; VALUE_SIZE] // just initalize with anything
         }
     }
 
-    /// Inserts the fingerprint into the `Bucket` if not full, OR 
-    /// the fingerprint is the same.
+    /// Sets the fingerprint of the `Bucket` if not full
+    /// OR the fingerprint is the same.
     /// This operation is O(1).
-    pub fn insert(&mut self, fingerprint: Fingerprint, value: Value) -> bool {
+    pub fn set(&mut self, fingerprint: Fingerprint, value: [u8; VALUE_SIZE]) -> bool {
     
         if self.fingerprint.is_empty() || self.fingerprint == fingerprint {
             self.fingerprint = fingerprint;
@@ -70,7 +70,7 @@ impl Bucket {
     }
 
     /// Deletes the given fingerprint from the bucket. This operation is O(1).
-    pub fn delete(&mut self, fingerprint: Fingerprint) -> bool {
+    pub fn reset(&mut self, fingerprint: Fingerprint) -> bool {
 
         if self.fingerprint == fingerprint {
             self.fingerprint = Fingerprint::empty();
@@ -81,28 +81,7 @@ impl Bucket {
         }
     }
 
-    /// Returns all current fingerprint data of the current buffer for storage.
-    pub fn get_fingerprint_data(&self) -> Vec<u8> {
-        self.fingerprint.data.to_vec()
-    }
-
-    /// Empties the bucket by setting each used entry to Fingerprint::empty(). Returns the number of entries that were modified.
-    #[inline(always)]
     pub fn clear(&mut self) {
-        *self = Self::new()
-    }
-}
-
-impl From<&[u8]> for Bucket {
-    /// Constructs a buffer of fingerprints from a set of previously exported fingerprints.
-    fn from(fingerprint: &[u8]) -> Self {
-
-        let mut new_fingerprint = Fingerprint::empty();
-        new_fingerprint.slice_copy(fingerprint);
-
-        Self {
-            fingerprint: new_fingerprint,
-            value: Value(0) // TODO: also import Values
-        }
+        self.fingerprint = Fingerprint::empty()
     }
 }

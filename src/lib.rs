@@ -31,6 +31,7 @@ use std::iter::repeat;
 use std::marker::PhantomData;
 use std::mem;
 
+use bucket::VALUE_SIZE;
 use rand::Rng;
 #[cfg(feature = "serde_support")]
 use serde_derive::{Deserialize, Serialize};
@@ -153,9 +154,9 @@ where
     }
 
     /// Checks if `key` is in the filter.
-    /// returns `Some(value)` if key probably is in the map
+    /// returns `Some([u8; VALUE_SIZE])` if key probably is in the map
     /// returns `None` if key is definitely not in the map
-    pub fn contains<T: ?Sized + Hash>(&self, key: &T) -> Option<Value> {
+    pub fn get<T: ?Sized + Hash>(&self, key: &T) -> Option<[u8; VALUE_SIZE]> {
         let FaI { fp, i1, i2 } = get_fai::<T, H>(key);
         let len = self.buckets.len();
         
@@ -182,7 +183,7 @@ where
     /// **Note:** When this returns `NotEnoughSpace`, the element given was
     /// actually added to the filter, but some random *other* element was
     /// removed. This might improve in the future.
-    pub fn add<T: ?Sized + Hash>(&mut self, key: &T, value: Value) -> Result<(), CuckooError> {
+    pub fn insert<T: ?Sized + Hash>(&mut self, key: &T, value: [u8; VALUE_SIZE]) -> Result<(), CuckooError> {
         let fai = get_fai::<T, H>(key);
         if self.put(fai.i1, fai.fp, value) || self.put(fai.i2, fai.fp, value) {
             return Ok(());
@@ -230,11 +231,11 @@ where
     /// Adds `key` to the filter if it does not exist in the filter yet.
     /// Returns `Ok(true)` if `key` was not yet present in the filter and added
     /// successfully.
-    pub fn test_and_add<T: ?Sized + Hash>(&mut self, key: &T, value: Value) -> Result<bool, CuckooError> {
-        if self.contains(key).is_some() {
+    pub fn test_and_add<T: ?Sized + Hash>(&mut self, key: &T, value: [u8; VALUE_SIZE]) -> Result<bool, CuckooError> {
+        if self.get(key).is_some() {
             Ok(false)
         } else {
-            self.add(key, value).map(|_| true)
+            self.insert(key, value).map(|_| true)
         }
     }
 
@@ -272,18 +273,10 @@ where
         self.len = 0;
     }
 
-    /// Extracts fingerprint values from all buckets, used for exporting the filters data.
-    fn values(&self) -> Vec<u8> {
-        self.buckets
-            .iter()
-            .flat_map(|b| b.get_fingerprint_data().into_iter())
-            .collect()
-    }
-
     /// Removes the item with the given fingerprint from the bucket indexed by i.
     fn remove(&mut self, fp: Fingerprint, i: usize) -> bool {
         let len = self.buckets.len();
-        if self.buckets[i % len].delete(fp) {
+        if self.buckets[i % len].reset(fp) {
             self.len -= 1;
             true
         } else {
@@ -292,10 +285,10 @@ where
     }
 
     /// overwrites a bucket if fingerprint matches (prob. because of same key)
-    fn put(&mut self, i: usize, fp: Fingerprint, value: Value) -> bool {
+    fn put(&mut self, i: usize, fp: Fingerprint, value: [u8; VALUE_SIZE]) -> bool {
         let len = self.buckets.len();
 
-        if self.buckets[i % len].insert(fp, value) {
+        if self.buckets[i % len].set(fp, value) {
             self.len += 1;
             true
         } else {
