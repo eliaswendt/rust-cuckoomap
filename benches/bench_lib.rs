@@ -40,7 +40,7 @@ fn perform_insertions<H: std::hash::Hasher + Default>(b: &mut test::Bencher) {
 
     b.iter(|| {
         for s in &split {
-            test::black_box(cf.test_and_add(s, Value::new()).unwrap());
+            test::black_box(cf.test_and_add(s, Value(0)).unwrap());
         }
     });
 }

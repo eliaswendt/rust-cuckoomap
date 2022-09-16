@@ -171,7 +171,7 @@ where
         None
     }
 
-    /// Adds `key` along with a `key` to the filter. Returns `Ok` if the insertion was successful,
+    /// Adds `key` along with a `value` to the filter. Returns `Ok` if the insertion was successful,
     /// but could fail with a `NotEnoughSpace` error, especially when the filter
     /// is nearing its capacity.
     /// Note that while you can put any hashable type in the same filter, beware
@@ -214,6 +214,9 @@ where
             }
             current_bucket = kicked_bucket;
         }
+
+        // TODO: consider resizing here
+
         // fp is dropped here, which means that the last item that was
         // rebucketed gets removed from the filter.
         // TODO: One could introduce a single-item cache for this element,
@@ -238,13 +241,6 @@ where
     /// Number of items in the filter.
     pub fn len(&self) -> usize {
         self.len
-    }
-
-    /// Exports fingerprints in all buckets, along with the filter's length for storage.
-    /// The filter can be recovered by passing the `ExportedCuckooFilter` struct to the
-    /// `from` method of `CuckooFilter`.
-    pub fn export(&self) -> ExportedCuckooFilter {
-        self.into()
     }
 
     /// Number of bytes the filter occupies in memory
@@ -315,55 +311,5 @@ where
             .count();
 
         n_filled_buckets as f64 / self.buckets.len() as f64
-    }
-}
-
-/// A minimal representation of the CuckooFilter which can be transfered or stored, then recovered at a later stage.
-#[derive(Debug)]
-#[cfg_attr(feature = "serde_support", derive(Deserialize, Serialize))]
-pub struct ExportedCuckooFilter {
-    #[cfg_attr(feature = "serde_support", serde(with = "serde_bytes"))]
-    pub values: Vec<u8>,
-    pub length: usize,
-}
-
-impl<H> From<ExportedCuckooFilter> for CuckooMap<H> {
-    /// Converts a simplified representation of a filter used for export to a
-    /// fully functioning version.
-    ///
-    /// # Contents
-    ///
-    /// * `values` - A serialized version of the `CuckooFilter`'s memory, where the
-    /// fingerprints in each bucket are chained one after another, then in turn all
-    /// buckets are chained together.
-    /// * `length` - The number of valid fingerprints inside the `CuckooFilter`.
-    /// This value is used as a time saving method, otherwise all fingerprints
-    /// would need to be checked for equivalence against the null pattern.
-    fn from(exported: ExportedCuckooFilter) -> Self {
-        // Assumes that the `BUCKET_SIZE` and `FINGERPRINT_SIZE` constants do not change.
-        Self {
-            buckets: exported
-                .values
-                .chunks(FINGERPRINT_SIZE)
-                .map(Bucket::from)
-                .collect::<Vec<_>>()
-                .into_boxed_slice(),
-            len: exported.length,
-            _hasher: PhantomData,
-        }
-    }
-}
-
-impl<H> From<&CuckooMap<H>> for ExportedCuckooFilter
-where
-    H: Hasher + Default,
-{
-    /// Converts a `CuckooFilter` into a simplified version which can be serialized and stored
-    /// for later use.
-    fn from(cuckoo: &CuckooMap<H>) -> Self {
-        Self {
-            values: cuckoo.values(),
-            length: cuckoo.len(),
-        }
     }
 }
