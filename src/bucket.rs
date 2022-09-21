@@ -33,11 +33,6 @@ impl Fingerprint {
     pub fn is_empty(&self) -> bool {
         self.data == EMPTY_FINGERPRINT
     }
-
-    /// Sets the fingerprint value to a previously exported one via an in-memory copy.
-    fn slice_copy(&mut self, fingerprint: &[u8]) {
-        self.data.copy_from_slice(fingerprint);
-    }
 }
 
 
@@ -56,16 +51,20 @@ impl Bucket {
         }
     }
 
-    /// Sets the fingerprint of the `Bucket` if not full
+    /// Sets the fingerprint of the `Bucket` if not already augmented
     /// OR the fingerprint is the same.
     /// This operation is O(1).
     pub fn set(&mut self, fingerprint: Fingerprint, value: [u8; VALUE_SIZE]) -> bool {
     
-        if self.fingerprint.is_empty() || self.fingerprint == fingerprint {
+        if self.fingerprint.is_empty() {
             self.fingerprint = fingerprint;
             self.value = value;
             return true;
+        } else if self.fingerprint == fingerprint {
+            self.value = value;
+            return true;
         }
+
         false
     }
 

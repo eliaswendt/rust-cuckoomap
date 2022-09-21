@@ -19,7 +19,7 @@
 mod bucket;
 mod util;
 
-use crate::bucket::{Bucket, Fingerprint, FINGERPRINT_SIZE};
+use crate::bucket::{Bucket, Fingerprint};
 use crate::util::{get_alt_index, get_fai, FaI};
 
 use std::cmp;
@@ -32,8 +32,6 @@ use std::marker::PhantomData;
 use std::mem;
 
 use bucket::VALUE_SIZE;
-use rand::Rng;
-use rand::prelude::ThreadRng;
 #[cfg(feature = "serde_support")]
 use serde_derive::{Deserialize, Serialize};
 
@@ -120,7 +118,6 @@ pub struct Value(pub u8);
 pub struct CuckooMap<H> {
     buckets: Box<[Bucket]>,
     len: usize,
-    rng: ThreadRng,
     _hasher: std::marker::PhantomData<H>,
 }
 
@@ -131,7 +128,7 @@ impl Default for CuckooMap<DefaultHasher> {
 }
 
 impl CuckooMap<DefaultHasher> {
-    /// Construct a CuckooFilter with default capacity and hasher.
+    /// Construct a CuckooMap with default capacity and hasher.
     pub fn new() -> Self {
         Self::with_capacity(DEFAULT_CAPACITY)
     }
@@ -141,7 +138,7 @@ impl<H> CuckooMap<H>
 where
     H: Hasher + Default,
 {
-    /// Constructs a Cuckoo Filter with a given max capacity
+    /// Constructs a Cuckoo Map with a given max capacity
     pub fn with_capacity(cap: usize) -> Self {
         let capacity = cmp::max(1, cap.next_power_of_two());
 
@@ -151,7 +148,6 @@ where
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
             len: 0,
-            rng: rand::thread_rng(),
             _hasher: PhantomData,
         }
     }
@@ -186,12 +182,12 @@ where
     /// **Note:** When this returns `NotEnoughSpace`, the element given was
     /// actually added to the filter, but some random *other* element was
     /// removed. This might improve in the future.
-    pub fn insert<T: ?Sized + Hash>(&mut self, key: &T, value: [u8; VALUE_SIZE]) -> Result<(), CuckooError> {
+    pub fn insert_or_update<T: ?Sized + Hash>(&mut self, key: &T, value: [u8; VALUE_SIZE]) -> Result<(), CuckooError> {
         let fai = get_fai::<T, H>(key);
         
         let mut current_bucket = Bucket {
             fingerprint: fai.fp,
-            value: value
+            value
         };
 
         if self.put(fai.i1, &current_bucket) || self.put(fai.i2, &current_bucket) {
@@ -199,7 +195,7 @@ where
         }
 
         let len = self.buckets.len();
-        let mut i = fai.random_index(&mut self.rng);
+        let mut i = fai.random_index(&mut rand::thread_rng());
 
         for _ in 0..MAX_REBUCKET {
             let kicked_bucket;
@@ -219,7 +215,7 @@ where
             current_bucket = kicked_bucket;
         }
 
-        // TODO: consider resizing here
+        // TODO: consider resizing the buffer
 
         // fp is dropped here, which means that the last item that was
         // rebucketed gets removed from the filter.
@@ -238,7 +234,7 @@ where
         if self.get(key).is_some() {
             Ok(false)
         } else {
-            self.insert(key, value).map(|_| true)
+            self.insert_or_update(key, value).map(|_| true)
         }
     }
 
@@ -257,7 +253,7 @@ where
         self.len == 0
     }
 
-    /// Deletes `data` from the filter. Returns true if `data` existed in the
+    /// Deletes `key` from the filter. Returns true if `key` existed in the
     /// filter before.
     pub fn delete<T: ?Sized + Hash>(&mut self, key: &T) -> bool {
         let FaI { fp, i1, i2 } = get_fai::<T, H>(key);
